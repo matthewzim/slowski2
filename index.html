@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>We Ski - Three.js</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+    canvas { display: block; }
+
+    #loading-overlay {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #e0e0e0; font-family: 'Segoe UI', Arial, sans-serif;
+      z-index: 1000; transition: opacity 0.5s;
+    }
+    #loading-overlay.hidden { opacity: 0; pointer-events: none; }
+    #loading-overlay h1 { font-size: 2.5rem; margin-bottom: 0.5rem; color: #fff; }
+    #loading-overlay p { font-size: 1rem; color: #a0a0c0; margin-bottom: 2rem; }
+    .loader { width: 60px; height: 60px; border: 4px solid #334; border-top-color: #6cf;
+      border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #hud {
+      position: fixed; top: 0; left: 0; width: 100%; padding: 1rem;
+      pointer-events: none; font-family: 'Segoe UI', Arial, sans-serif;
+      z-index: 100;
+    }
+    #hud .stat {
+      display: inline-block; background: rgba(0,0,0,0.5);
+      color: #fff; padding: 0.4rem 0.8rem; border-radius: 6px;
+      margin-right: 0.5rem; font-size: 0.9rem;
+    }
+    #controls-hint {
+      position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.5); color: #a0a0c0; padding: 0.5rem 1rem;
+      border-radius: 8px; font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 0.8rem; z-index: 100; pointer-events: none;
+      transition: opacity 2s; opacity: 1;
+    }
+    #controls-hint.hidden { opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="loading-overlay">
+    <h1>We Ski</h1>
+    <p>Three.js Edition</p>
+    <div class="loader"></div>
+  </div>
+
+  <div id="hud">
+    <span class="stat" id="speed-display">Speed: 0 km/h</span>
+    <span class="stat" id="altitude-display">Alt: 0m</span>
+    <span class="stat" id="time-display">Time: 0:00</span>
+  </div>
+
+  <div id="controls-hint">
+    WASD / Arrow Keys: Steer &nbsp; | &nbsp; Space: Jump &nbsp; | &nbsp; R: Reset
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

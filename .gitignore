@@ -1,0 +1,11 @@
+node_modules/
+dist/
+public/assets/raw/
+public/assets/models/
+public/assets/textures/
+public/assets/audio/
+public/assets/manifest.json
+*.dat
+__pycache__/
+*.pyc
+.DS_Store
