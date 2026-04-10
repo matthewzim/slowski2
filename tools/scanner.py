@@ -5,27 +5,34 @@ Uses memory-mapped I/O for efficient scanning of 700MB+ files.
 
 import mmap
 import struct
-import os
 import json
 from pathlib import Path
 
 from yaz0_decoder import is_yaz0, decompress as yaz0_decompress
 
 
-# Magic byte signatures to search for
+# Magic byte signatures with validation
 SIGNATURES = {
     b'bres': {
         'name': 'BRRES',
         'ext': '.brres',
         'desc': '3D model/texture container',
-        'size_offset': 8,  # File size at offset 8 from magic
+        'size_offset': 8,
         'size_fmt': '>I',
+        'max_size': 16_000_000,  # 16MB max -- real BRRES files are typically 1-10MB
+        'validate': lambda mm, off: (
+            off + 6 <= len(mm) and struct.unpack_from('>H', mm, off + 4)[0] == 0xFEFF
+        ),
     },
     b'\x00\x20\xAF\x30': {
         'name': 'TPL',
         'ext': '.tpl',
         'desc': 'Texture palette library',
-        'size_offset': None,  # Need to calculate from header
+        'size_offset': None,
+        'max_size': 4_000_000,
+        'validate': lambda mm, off: (
+            off + 12 <= len(mm) and struct.unpack_from('>I', mm, off + 4)[0] < 500
+        ),
     },
     b'\x55\xAA\x38\x2D': {
         'name': 'U8',
@@ -33,14 +40,17 @@ SIGNATURES = {
         'desc': 'Nintendo U8 archive',
         'size_offset': 8,
         'size_fmt': '>I',
+        'max_size': 32_000_000,
     },
     b'Yaz0': {
         'name': 'Yaz0',
         'ext': '.szs',
         'desc': 'Yaz0 compressed data',
-        'size_offset': 4,
-        'size_fmt': '>I',
-        'add_header': True,  # Size is decompressed size, need actual compressed size
+        'size_offset': None,
+        'max_size': 16_000_000,
+        'validate': lambda mm, off: (
+            off + 8 <= len(mm) and 0 < struct.unpack_from('>I', mm, off + 4)[0] < 64_000_000
+        ),
     },
     b'RSTM': {
         'name': 'BRSTM',
@@ -48,6 +58,10 @@ SIGNATURES = {
         'desc': 'Audio stream',
         'size_offset': 8,
         'size_fmt': '>I',
+        'max_size': 32_000_000,
+        'validate': lambda mm, off: (
+            off + 6 <= len(mm) and struct.unpack_from('>H', mm, off + 4)[0] in (0xFEFF, 0xFFFE)
+        ),
     },
     b'RSAR': {
         'name': 'BRSAR',
@@ -55,12 +69,17 @@ SIGNATURES = {
         'desc': 'Sound archive',
         'size_offset': 8,
         'size_fmt': '>I',
+        'max_size': 32_000_000,
+        'validate': lambda mm, off: (
+            off + 6 <= len(mm) and struct.unpack_from('>H', mm, off + 4)[0] in (0xFEFF, 0xFFFE)
+        ),
     },
     b'J3D2': {
         'name': 'BMD/BDL',
         'ext': '.bmd',
         'desc': 'J3D model',
         'size_offset': None,
+        'max_size': 8_000_000,
     },
     b'REFF': {
         'name': 'BREFF',
@@ -68,6 +87,10 @@ SIGNATURES = {
         'desc': 'Effect file',
         'size_offset': 8,
         'size_fmt': '>I',
+        'max_size': 8_000_000,
+        'validate': lambda mm, off: (
+            off + 6 <= len(mm) and struct.unpack_from('>H', mm, off + 4)[0] in (0xFEFF, 0xFFFE)
+        ),
     },
     b'REFT': {
         'name': 'BREFT',
@@ -75,10 +98,14 @@ SIGNATURES = {
         'desc': 'Effect texture',
         'size_offset': 8,
         'size_fmt': '>I',
+        'max_size': 8_000_000,
+        'validate': lambda mm, off: (
+            off + 6 <= len(mm) and struct.unpack_from('>H', mm, off + 4)[0] in (0xFEFF, 0xFFFE)
+        ),
     },
 }
 
-# BOM-aware signatures (these have a 2-byte BOM after the magic)
+# BOM-aware signatures
 BOM_SIGNATURES = {b'RSTM', b'RSAR', b'REFF', b'REFT'}
 
 
@@ -88,36 +115,43 @@ def get_file_size(mm, offset, sig_info, magic):
         return None
 
     size_pos = offset + sig_info['size_offset']
-    fmt = sig_info['size_fmt']
+    fmt = sig_info.get('size_fmt', '>I')
     size_len = struct.calcsize(fmt)
 
     if size_pos + size_len > len(mm):
         return None
 
-    # For BOM-aware formats, check BOM to determine endianness
+    # Check BOM for endianness
     if magic in BOM_SIGNATURES:
         bom_pos = offset + 4
         if bom_pos + 2 <= len(mm):
             bom = struct.unpack_from('>H', mm, bom_pos)[0]
             if bom == 0xFFFE:
-                fmt = fmt.replace('>', '<')  # Little-endian
+                fmt = fmt.replace('>', '<')
 
     size = struct.unpack_from(fmt, mm, size_pos)[0]
 
-    # For BRRES, the size field includes the header
-    if magic == b'bres':
-        pass  # Size is total file size
-
-    # Sanity check
-    if size < 16 or size > 100_000_000:  # 100MB max per file
+    # Sanity checks
+    max_size = sig_info.get('max_size', 16_000_000)
+    if size < 32 or size > max_size:
         return None
 
-    # For Yaz0, we store the header + some padding to find compressed size
-    if magic == b'Yaz0':
-        # Yaz0 doesn't store compressed size - scan for next magic or use heuristic
+    # Verify size doesn't exceed remaining data
+    if offset + size > len(mm):
         return None
 
     return size
+
+
+def validate_match(mm, offset, sig_info):
+    """Run format-specific validation to reject false positives."""
+    validator = sig_info.get('validate')
+    if validator:
+        try:
+            return validator(mm, offset)
+        except Exception:
+            return False
+    return True
 
 
 def scan_file(filepath, output_dir, progress_callback=None):
@@ -132,7 +166,6 @@ def scan_file(filepath, output_dir, progress_callback=None):
 
     file_size = filepath.stat().st_size
     found_assets = []
-    magic_bytes_list = list(SIGNATURES.keys())
 
     print(f"Scanning {filepath.name} ({file_size / 1024 / 1024:.1f} MB)...")
     print(f"Looking for {len(SIGNATURES)} format signatures...")
@@ -144,11 +177,18 @@ def scan_file(filepath, output_dir, progress_callback=None):
             print(f"  Scanning for {sig_info['name']} ({magic.hex()})...")
             search_pos = 0
             count = 0
+            false_positives = 0
 
             while True:
                 pos = mm.find(magic, search_pos)
                 if pos == -1:
                     break
+
+                # Validate this isn't a false positive
+                if not validate_match(mm, pos, sig_info):
+                    false_positives += 1
+                    search_pos = pos + 4
+                    continue
 
                 # Try to determine file size
                 size = get_file_size(mm, pos, sig_info, magic)
@@ -171,16 +211,19 @@ def scan_file(filepath, output_dir, progress_callback=None):
                     asset_info['filename'] = filename
                     print(f"    Found at 0x{pos:08X}, size {size:,} bytes -> {filename}")
                 else:
-                    # Try a default extraction size (64KB) for unknown sizes
-                    default_size = min(65536, len(mm) - pos)
+                    # Extract a small sample for inspection (32KB)
+                    sample_size = min(32768, len(mm) - pos)
                     filename = f"{sig_info['name']}_{count:04d}_partial{sig_info['ext']}"
                     out_path = raw_dir / filename
                     with open(out_path, 'wb') as out_f:
-                        out_f.write(mm[pos:pos + default_size])
+                        out_f.write(mm[pos:pos + sample_size])
                     asset_info['extracted'] = True
                     asset_info['partial'] = True
                     asset_info['filename'] = filename
-                    print(f"    Found at 0x{pos:08X}, size unknown -> {filename} (partial)")
+                    if size:
+                        print(f"    Found at 0x{pos:08X}, claimed size {size:,} (exceeds file) -> {filename} (partial)")
+                    else:
+                        print(f"    Found at 0x{pos:08X}, size unknown -> {filename} (partial)")
 
                 found_assets.append(asset_info)
                 count += 1
@@ -189,8 +232,8 @@ def scan_file(filepath, output_dir, progress_callback=None):
                 if progress_callback:
                     progress_callback(search_pos / file_size)
 
-            if count > 0:
-                print(f"    Total: {count} {sig_info['name']} file(s)")
+            if count > 0 or false_positives > 0:
+                print(f"    Total: {count} valid, {false_positives} rejected")
 
         mm.close()
 
@@ -203,15 +246,15 @@ def decompress_yaz0_files(output_dir):
     raw_dir = Path(output_dir) / 'raw'
     decompressed = []
 
-    for yaz0_file in raw_dir.glob('Yaz0_*'):
+    for yaz0_file in sorted(raw_dir.glob('Yaz0_*')):
+        if yaz0_file.suffix == '.dec':
+            continue
         try:
-            with open(yaz0_file, 'rb') as f:
-                data = f.read()
+            data = yaz0_file.read_bytes()
             if is_yaz0(data):
                 dec_data = yaz0_decompress(data)
                 dec_path = yaz0_file.with_suffix('.dec')
-                with open(dec_path, 'wb') as f:
-                    f.write(dec_data)
+                dec_path.write_bytes(dec_data)
                 decompressed.append(dec_path)
                 print(f"  Decompressed {yaz0_file.name} -> {dec_path.name} ({len(dec_data):,} bytes)")
         except Exception as e:

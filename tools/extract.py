@@ -28,9 +28,16 @@ def process_brres_files(raw_dir, models_dir, textures_dir):
     """Process extracted BRRES files: parse models and textures."""
     results = {'models': [], 'textures': []}
 
+    MAX_BRRES_SIZE = 16_000_000  # 16MB - reject likely false positives
+
     for brres_file in sorted(raw_dir.glob('BRRES_*.brres')):
         print(f"\n  Processing {brres_file.name}...")
         try:
+            file_size = brres_file.stat().st_size
+            if file_size > MAX_BRRES_SIZE:
+                print(f"    Skipping: too large ({file_size:,} bytes), likely false positive")
+                continue
+
             with open(brres_file, 'rb') as f:
                 data = f.read()
 
@@ -97,9 +104,16 @@ def process_tpl_files(raw_dir, textures_dir):
     """Process extracted TPL texture files."""
     results = []
 
+    MAX_TPL_SIZE = 4_000_000  # 4MB
+
     for tpl_file in sorted(raw_dir.glob('TPL_*.tpl')):
         print(f"\n  Processing {tpl_file.name}...")
         try:
+            file_size = tpl_file.stat().st_size
+            if file_size > MAX_TPL_SIZE:
+                print(f"    Skipping: too large ({file_size:,} bytes), likely false positive")
+                continue
+
             with open(tpl_file, 'rb') as f:
                 data = f.read()
 
@@ -133,9 +147,16 @@ def process_audio_files(raw_dir, audio_dir):
     """Process extracted BRSTM audio files."""
     results = []
 
+    MAX_BRSTM_SIZE = 32_000_000  # 32MB
+
     for brstm_file in sorted(raw_dir.glob('BRSTM_*.brstm')):
         print(f"\n  Processing {brstm_file.name}...")
         try:
+            file_size = brstm_file.stat().st_size
+            if file_size > MAX_BRSTM_SIZE:
+                print(f"    Skipping: too large ({file_size:,} bytes), likely false positive")
+                continue
+
             with open(brstm_file, 'rb') as f:
                 data = f.read()
 

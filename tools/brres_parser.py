@@ -48,6 +48,12 @@ class BRRESParser:
         self.root_offset = struct.unpack_from(f'{self.endian}H', self.data, 12)[0]
         self.section_count = struct.unpack_from(f'{self.endian}H', self.data, 14)[0]
 
+        # Sanity checks to avoid OOM on corrupt/false-positive data
+        if self.file_size > len(self.data) + 16:
+            raise ValueError(f"BRRES claimed size {self.file_size} exceeds data length {len(self.data)}")
+        if self.section_count > 100:
+            raise ValueError(f"BRRES section count {self.section_count} is unreasonable")
+
         # Parse root section
         self._parse_root()
 
@@ -63,13 +69,17 @@ class BRRESParser:
         # Parse root index group at offset + 8
         self._parse_index_group(offset + 8, is_root=True)
 
-    def _parse_index_group(self, offset, is_root=False):
+    def _parse_index_group(self, offset, is_root=False, depth=0):
         """Parse a BRRES index group (tree structure)."""
+        if depth > 4:
+            return  # Prevent infinite recursion on corrupt data
         if offset + 8 > len(self.data):
             return
 
         group_size = struct.unpack_from(f'{self.endian}I', self.data, offset)[0]
         entry_count = struct.unpack_from(f'{self.endian}I', self.data, offset + 4)[0]
+        if entry_count > 1000:
+            return  # Sanity cap - real BRRES files have < 100 entries
 
         # Each entry is 16 bytes: id(2), unk(2), left(2), right(2), name_offset(4), data_offset(4)
         entry_offset = offset + 8
@@ -93,7 +103,7 @@ class BRRESParser:
             if is_root:
                 # Root entries point to sub-index-groups
                 abs_data_off = offset + data_off
-                self._parse_index_group(abs_data_off)
+                self._parse_index_group(abs_data_off, depth=depth + 1)
             else:
                 # Sub entries point to actual sub-files
                 abs_data_off = offset + data_off
