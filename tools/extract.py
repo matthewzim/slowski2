@@ -22,6 +22,101 @@ from mdl0_parser import MDL0Parser
 from tpl_parser import TPLParser
 from audio_extractor import BRSTMParser
 from gltf_converter import mdl0_to_gltf
+from u8_parser import U8Archive
+
+
+def process_u8_archives(raw_dir):
+    """Unpack U8 archives and return list of extracted sub-files."""
+    u8_dir = raw_dir / 'u8_unpacked'
+    all_extracted = []
+
+    u8_files = sorted(raw_dir.glob('U8_*.arc'))
+    if not u8_files:
+        return all_extracted
+
+    print(f"\n  Unpacking {len(u8_files)} U8 archives...")
+
+    for u8_file in u8_files:
+        try:
+            file_size = u8_file.stat().st_size
+            if file_size > 64_000_000:
+                print(f"    Skipping {u8_file.name}: too large ({file_size:,} bytes)")
+                continue
+            if file_size < 32:
+                print(f"    Skipping {u8_file.name}: too small ({file_size} bytes)")
+                continue
+
+            data = u8_file.read_bytes()
+            archive = U8Archive(data)
+            files = archive.list_files()
+
+            if not files:
+                print(f"    {u8_file.name}: empty archive")
+                continue
+
+            # Extract to a subdirectory named after the archive
+            out_dir = u8_dir / u8_file.stem
+            extracted = archive.extract_all(out_dir)
+
+            print(f"    {u8_file.name}: {len(extracted)} files extracted")
+            for ef in extracted:
+                print(f"      {ef['path']} ({ef['size']:,} bytes)")
+
+            # Copy extracted files that match known formats back to raw_dir
+            # so they get processed in later phases
+            for ef in extracted:
+                name_lower = ef['name'].lower()
+                full_path = Path(ef['full_path'])
+                if not full_path.exists():
+                    continue
+
+                # Check file magic to identify format
+                file_data = full_path.read_bytes()
+                if len(file_data) < 4:
+                    continue
+
+                magic = file_data[:4]
+                dest_name = None
+
+                if magic == b'bres':
+                    dest_name = f"U8_{u8_file.stem}_{ef['name']}"
+                    if not dest_name.endswith('.brres'):
+                        dest_name += '.brres'
+                    # Write with BRRES_ prefix so process_brres_files finds it
+                    dest_path = raw_dir / f"BRRES_{dest_name}"
+                    dest_path.write_bytes(file_data)
+                    print(f"      -> Copied as {dest_path.name} (BRRES)")
+
+                elif magic == b'\x00\x20\xAF\x30':
+                    dest_name = f"U8_{u8_file.stem}_{ef['name']}"
+                    if not dest_name.endswith('.tpl'):
+                        dest_name += '.tpl'
+                    dest_path = raw_dir / f"TPL_{dest_name}"
+                    dest_path.write_bytes(file_data)
+                    print(f"      -> Copied as {dest_path.name} (TPL)")
+
+                elif magic == b'RSTM':
+                    dest_name = f"U8_{u8_file.stem}_{ef['name']}"
+                    if not dest_name.endswith('.brstm'):
+                        dest_name += '.brstm'
+                    dest_path = raw_dir / f"BRSTM_{dest_name}"
+                    dest_path.write_bytes(file_data)
+                    print(f"      -> Copied as {dest_path.name} (BRSTM)")
+
+                elif magic == b'Yaz0':
+                    dest_name = f"U8_{u8_file.stem}_{ef['name']}"
+                    if not dest_name.endswith('.szs'):
+                        dest_name += '.szs'
+                    dest_path = raw_dir / f"Yaz0_{dest_name}"
+                    dest_path.write_bytes(file_data)
+                    print(f"      -> Copied as {dest_path.name} (Yaz0)")
+
+            all_extracted.extend(extracted)
+
+        except Exception as e:
+            print(f"    Error unpacking {u8_file.name}: {e}")
+
+    return all_extracted
 
 
 def process_brres_files(raw_dir, models_dir, textures_dir):
@@ -229,6 +324,21 @@ Example usage:
             print(f"\n  Re-scanning {dec_file.name}...")
             dec_assets = scan_file(dec_file, output_dir)
             found_assets.extend(dec_assets)
+
+    # Phase 2b: Unpack U8 archives
+    u8_count = sum(1 for a in found_assets if a['type'] == 'U8')
+    if u8_count > 0:
+        print(f"\n{'=' * 60}")
+        print(f"Phase 2b: Unpacking {u8_count} U8 archives")
+        print("=" * 60)
+        u8_extracted = process_u8_archives(raw_dir)
+        print(f"\n  Total files extracted from U8 archives: {len(u8_extracted)}")
+
+        # Decompress any Yaz0 files found inside U8 archives
+        yaz0_from_u8 = sorted(raw_dir.glob('Yaz0_U8_*.szs'))
+        if yaz0_from_u8:
+            print(f"\n  Decompressing {len(yaz0_from_u8)} Yaz0 files from U8 archives...")
+            decompress_results = decompress_yaz0_files(output_dir)
 
     if args.scan_only:
         # Save manifest and exit

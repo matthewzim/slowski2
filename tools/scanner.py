@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from yaz0_decoder import is_yaz0, decompress as yaz0_decompress
+from u8_parser import calc_u8_size, validate_u8
 
 
 # Magic byte signatures with validation
@@ -38,9 +39,10 @@ SIGNATURES = {
         'name': 'U8',
         'ext': '.arc',
         'desc': 'Nintendo U8 archive',
-        'size_offset': 8,
-        'size_fmt': '>I',
-        'max_size': 32_000_000,
+        'size_offset': None,  # U8 size is computed from node table, not a header field
+        'size_func': lambda mm, off: calc_u8_size(mm, off),
+        'max_size': 64_000_000,
+        'validate': lambda mm, off: validate_u8(mm, off),
     },
     b'Yaz0': {
         'name': 'Yaz0',
@@ -111,6 +113,14 @@ BOM_SIGNATURES = {b'RSTM', b'RSAR', b'REFF', b'REFT'}
 
 def get_file_size(mm, offset, sig_info, magic):
     """Try to determine the size of a found file from its header."""
+    # Check for custom size calculation function first
+    size_func = sig_info.get('size_func')
+    if size_func:
+        try:
+            return size_func(mm, offset)
+        except Exception:
+            return None
+
     if sig_info.get('size_offset') is None:
         return None
 
