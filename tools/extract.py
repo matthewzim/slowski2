@@ -28,7 +28,7 @@ def process_brres_files(raw_dir, models_dir, textures_dir):
     """Process extracted BRRES files: parse models and textures."""
     results = {'models': [], 'textures': []}
 
-    MAX_BRRES_SIZE = 16_000_000  # 16MB - reject likely false positives
+    MAX_BRRES_SIZE = 20_000_000  # 20MB - reject likely false positives
 
     for brres_file in sorted(raw_dir.glob('BRRES_*.brres')):
         print(f"\n  Processing {brres_file.name}...")

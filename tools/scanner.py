@@ -19,7 +19,7 @@ SIGNATURES = {
         'desc': '3D model/texture container',
         'size_offset': 8,
         'size_fmt': '>I',
-        'max_size': 16_000_000,  # 16MB max -- real BRRES files are typically 1-10MB
+        'max_size': 20_000_000,  # 20MB max -- real BRRES files are typically 1-10MB
         'validate': lambda mm, off: (
             off + 6 <= len(mm) and struct.unpack_from('>H', mm, off + 4)[0] == 0xFEFF
         ),
